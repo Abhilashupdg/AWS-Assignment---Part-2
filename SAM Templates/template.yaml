@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+Parameters:
+   EventBridgeRuleName:
+      Type: String
+      Description: Rule Name
+      Default: sam-eb-rule
+
+   LambdaFunctionName:
+      Type: String
+      Description: Function Name
+      Default: sam-template-function-db
+
+   DynamoTableName:
+      Type: String
+      Description: Table Name
+      Default: sam-template-events
+
+   SNSTopicName:
+      Type: String
+      Description: SNS Topic Name
+      Default: sam-sns-topic
+
+
+
+Resources:
+# Lambda Function
+ LambdaFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Handler: code_deploy.lambda_handler
+      Runtime: python3.9
+      CodeUri: .
+      Description: A Lambda function to write CloudWatch Events to DynamoDB.
+      MemorySize: 128
+      Timeout: 3
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DynamoDBTable
+          REGION_NAME: !Ref AWS::Region
+      Events:
+        EventRule:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              detail:
+                state:
+                  - pending
+                  - running
+                  - stopped
+                  - terminated
+            Target:
+               Id: SNSTopic
+    Policies:
+      - DynamoDBWritePolicy:
+          TableName: !GetAtt DynamoDBTable.tableName
+
+
+
+ # DynamoDB Table
+ DynamoDBTable:
+    Type: 'AWS::Serverless::SimpleTable'
+    Properties:
+      PrimaryKey:
+        Name: event_id
+        Type: String
+      TableName: !Ref DynamoTableName
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+
+# SNS Notification
+ SNSTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      Subscription:
+          - Endpoint: "abhilash.prakash@datagrokr.com"
+            Protocol: "email"
+      TopicName: !Ref SNSTopicName
+      
+      
+
+
