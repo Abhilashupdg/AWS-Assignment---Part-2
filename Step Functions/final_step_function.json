@@ -1,0 +1,102 @@
+{
+  "Comment": "Step Functions Assignment",
+  "StartAt": "Create DynamoDB record for new execution",
+  "States": {
+    "Create DynamoDB record for new execution": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "SampleTable",
+        "Item": {
+          "step_function_name": {
+            "S.$": "$.step_function_name"
+          },
+          "step_function_launch_time": {
+            "S.$": "$.step_function_launch_time"
+          },
+          "existing-instance-id": {
+            "S.$": "$.existing-instance-id"
+          },
+          "step_function_status": {
+            "S.$": "$.step_function_status"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "Create AMI from existing EC2 instance"
+    },
+    "Create AMI from existing EC2 instance": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:540167800290:function:StepFunction",
+      "Next": "Launch EC2 instance from new AMI",
+      "ResultPath": "$.taskresult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Update DynamoDB Table with Failed Status",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "Launch EC2 instance from new AMI": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:540167800290:function:Instance_Create",
+      "Next": "Update DynamoDB Table with Success",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Update DynamoDB Table with Failed Status",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "Update DynamoDB Table with Success": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "SampleTable",
+        "Item": {
+          "step_function_name": {
+            "S.$": "$.step_function_name"
+          },
+          "step_function_launch_time": {
+            "S.$": "$.step_function_launch_time"
+          },
+          "existing-instance-id": {
+            "S.$": "$.existing-instance-id"
+          },
+          "status": {
+            "S": "SUCCESS"
+          }
+        }
+      },
+      "End": true
+    },
+    "Update DynamoDB Table with Failed Status": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "SampleTable",
+        "Item": {
+          "step_function_name": {
+            "S.$": "$.step_function_name"
+          },
+          "step_function_launch_time": {
+            "S.$": "$.step_function_launch_time"
+          },
+          "existing-instance-id": {
+            "S.$": "$.existing-instance-id"
+          },
+          "status": {
+            "S": "FAILED"
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}
