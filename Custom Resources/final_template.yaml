@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A CloudFormation Custom Resource Template to check the presence of VPC Id.
+
+#Giving an option for the user to enter the VPCid they want to be checked
+Parameters:
+  VPCId:
+    Description: VPC Id to be checked
+    Default: DefaultVPC
+    Type: String
+    
+#Creating a log group to store the output and log information
+Resources:
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/function-custom-resource
+      RetentionInDays: 30
+  
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: '/'
+      Policies:
+      - PolicyName: custom-resource-execution-role
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:DescribeLogGroup
+            - logs:PutLogEvents
+            Resource: !GetAtt Logs.Arn
+      - PolicyName: "describe-vpc-and-subnets"
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: "Allow"
+              Action:
+                - "ec2:DescribeVPCs"
+                - "ec2:DescribeSubnets"
+              Resource: "*"
+  
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          
+          import os
+          import cfnresponse
+          import boto3
+  
+          def handler(event, context):
+              
+              try:
+                
+                if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, "SUCCESS", {'Message': "Resource deletion successful" })
+                  return
+
+                elif event['RequestType'] == 'Update':
+                  cfnresponse.send(event, context, "SUCCESS", {'Message': "Resource updation successful"})
+
+                elif event['RequestType'] == 'Create':
+                  request_properties = event.get('ResourceProperties', None)
+
+                  VpcToGet = event['ResourceProperties'].get('VpcToGet', '')
+                  ec2 = boto3.resource('ec2')
+                  VpcCheckedList = []
+                  TargetVPC = None
+                  vpclist = ec2.vpcs.all()
+                   
+                  #this checks for all the VPCs present and if the Defualt VPC is found it returns it 
+                  #with the ID and the CIDR block else it says that it is not present
+                  for vpc in vpclist:
+                      VpcCheckedList.append(vpc.id)
+                      if VpcToGet == "DefaultVPC" and vpc.is_default == True:
+                         TargetVPC = vpc
+                      elif vpc.vpc_id == VpcToGet:
+                         TargetVPC = vpc
+
+                  if TargetVPC == None:
+                    raise Exception(f'VPC {VpcToGet} is not in this account and region, VPC which are: {", ".join(VpcCheckedList)}')
+                  else:
+                    VPCOutput = TargetVPC.id
+                    VPCcidr = TargetVPC.cidr_block
+                    subidlist = []
+                    zoneidlist = []
+                    subnets = list(TargetVPC.subnets.all())
+
+                    for subnet in subnets:
+                       subidlist.append(subnet.id)
+                       zoneidlist.append(subnet.availability_zone)
+                    subidOutput = ",".join(subidlist)
+                    zoneidOutput = ",".join(zoneidlist)
+
+                    if not subnets:
+                      raise Exception(f'There are no subnets in VPC: {VpcToGet}')
+
+                    responseData = {}
+                    responseData['VPC_id'] = VPCOutput
+                    responseData['VPC_CIDR'] = VPCcidr
+                    responseData['OrderedSubnetIdList'] = subidOutput
+                    responseData['OrderedSubnetIdList'] = zoneidOutput
+                    responseData['SubnetCount'] = len(subidlist)
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+              
+              except Exception as err:
+                  cfnresponse.send(event, context, "FAILED", {"Message": "Failed"})
+                
+      
+      FunctionName: function-custom-resource
+      Handler: index.handler
+      Role: !GetAtt ExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 30
+      Environment:
+        Variables:
+          REGION_NAME: !Ref AWS::Region
+
+  
+  CustomResource:
+    Type: Custom::VPCInfo
+    Properties:
+      VpcToGet: !Ref VPCId
+      ServiceToken: !GetAtt Function.Arn
+
+
